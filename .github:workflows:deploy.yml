@@ -2,6 +2,7 @@ name: Deploy Online Folder to Pages
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:   # ←加上这一行，才会出现Run workflow手动按钮
 permissions:
   contents: read
   pages: write
