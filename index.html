@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>浏览器 OCR 工具 · 图片/PDF 文字提取（纯前端）</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:#0f1420;color:#e6ebf5;line-height:1.6;padding:18px 18px}
+  .box{max-width:min(96vw,1200px);margin:0 auto;background:#171d2b;border:1px solid #2b3447;border-radius:5px;padding:18px;
+    height:calc(100vh - 36px);display:flex;flex-direction:column}
+  h1{font-size:22px;margin:0 0 6px;display:flex;align-items:center;flex-wrap:wrap}
+  .sub{color:#9fb0c9;font-size:13px;margin-bottom:8px}
+  .row{display:flex;justify-content:flex-start;gap:12px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  label{font-size:14px;color:#9fb0c9}
+  select{font-size:14px;border-radius:5px;border:1px solid #2b3447;background:#1e2638;color:#e6ebf5;height:36px;padding:0 14px}
+  /* 含图标的按钮：图标 + 文案 */
+  button{font-size:14px;border-radius:5px;border:1px solid #2b3447;background:#1e2638;color:#e6ebf5;height:36px;padding:0 14px;display:inline-flex;align-items:center;gap:6px}
+  .btn svg{width:16px;height:16px;flex:none}
+  /* 预览区空状态的"选择文件"按钮：作为主操作，做成可见按钮 */
+  .filebtn{position:relative;display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 16px;border-radius:5px;
+    background:#1e2638;border:1px solid #2b3447;color:#e6ebf5;cursor:pointer;overflow:hidden;font-size:14px}
+  .filebtn:hover{background:#27324a}
+  .filebtn svg{width:16px;height:16px;flex:none}
+  /* 识别进行中：禁止再次点击上传（PDF 无工具条，此按钮是唯一换文件入口） */
+  .filebtn.disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
+  .filebtn.disabled:hover{background:#1e2638}
+  .fileinput{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0;margin:0}
+  button{cursor:pointer;background:#5b8cff;border-color:#5b8cff;color:#fff;font-weight:600}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .ghost{background:#1e2638;border:1px solid #2b3447;color:#9fb0c9;font-weight:400}
+  /* 下载分割按钮：主按钮 + 箭头（点击弹出格式菜单） */
+  .dl-split{position:relative;display:inline-flex}
+  .dl-split #dl{border-top-right-radius:0;border-bottom-right-radius:0}
+  .dl-split .caret{margin-left:-1px;border-top-left-radius:0;border-bottom-left-radius:0;padding:0 8px}
+  .dl-split .caret svg{width:12px;height:12px}
+  .dl-split .caret.open{background:#27324a}
+  .fmt-menu{position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);min-width:168px;background:#1b2436;border:1px solid #2b3447;border-radius:6px;box-shadow:0 6px 22px rgba(0,0,0,.45);padding:4px;z-index:50;display:none}
+  /* 语言下拉容器（与下载分割按钮同款自定义下拉，菜单同样居中对齐） */
+  .lang-split{position:relative;display:inline-flex}
+  .lang-split .caret-svg{width:12px;height:12px;margin-left:6px}
+  .fmt-menu.open{display:block}
+  .fmt-item{padding:8px 10px;border-radius:4px;font-size:14px;color:#e6ebf5;cursor:pointer;white-space:nowrap;display:flex;justify-content:space-between;align-items:center}
+  .fmt-item:hover{background:#27324a}
+  .fmt-item.active{color:#5b8cff;font-weight:600}
+  .fmt-item.active::after{content:"✓";margin-left:10px;font-size:12px}
+  .fmt-item.disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+  #status{margin:6px 0;font-size:12px;color:#9fb0c9;min-height:16px;display:flex;align-items:center}
+  #stIcon{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;margin-right:6px;flex:none}
+  /* 无图标时收起占位，让状态文字与上方按钮左对齐 */
+  #stIcon:empty{display:none}
+  .spin{width:12px;height:12px;border:2px solid #5b8cff;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+.cols{flex:1 1 auto;min-height:0;width:100%;display:flex;gap:12px;margin-top:8px;align-items:stretch}
+.col{flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column}
+  .stage{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;background:#0c1018;border:1px dashed #2b3447;border-radius:5px;padding:12px;position:relative;overflow:hidden}
+  .imgwrap{position:relative;display:none;max-width:100%;max-height:100%}
+  #preview{max-width:100%;max-height:100%;border-radius:5px;display:block;background:#fff;
+    transform-origin:0 0;cursor:grab;touch-action:none;will-change:transform}
+  .pholder{color:#6b7890;font-size:13px;text-align:center;padding:0 12px;white-space:pre-line}
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;width:100%;height:100%}
+  /* 左侧垂直缩放工具条：半透明深色底 + 阴影，深浅背景都可见（无外边框） */
+  .zoombar{position:absolute;left:10px;top:50%;transform:translateY(-50%);z-index:6;
+    display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 6px;
+    border-radius:5px;background:rgba(18,22,30,.55);
+    backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+    box-shadow:0 2px 10px rgba(0,0,0,.55);
+    opacity:0;transition:opacity .35s ease;pointer-events:none}
+  .zoombar.show{opacity:1;pointer-events:auto}
+  .zbtn{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    cursor:pointer;color:#fff;background:rgba(18,22,30,.55);border:1px solid rgba(255,255,255,.7);
+    box-shadow:0 1px 4px rgba(0,0,0,.5);padding:0}
+  .zbtn:hover{background:rgba(91,140,255,.85)}
+  .zbtn:active{transform:scale(.92)}
+  .zbtn svg{width:18px;height:18px;display:block}
+  @media(max-width:640px){.cols{flex-direction:column}}
+  textarea{flex:1 1 auto;min-height:0;min-width:0;width:100%;max-width:100%;background:#0c1018;color:#d7e2f4;border:1px solid #2b3447;border-radius:5px;padding:14px;font-size:14px;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;resize:none;white-space:pre-wrap;overflow-wrap:break-word}
+  /* 深色滚动条：暗色界面下避免出现系统默认的浅色滚动条 */
+  *{scrollbar-width:thin;scrollbar-color:#3a4a68 transparent}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#3a4a68;border-radius:5px;border:2px solid #0c1018}
+  ::-webkit-scrollbar-thumb:hover{background:#4c5f85}
+  .pill{display:inline-block;background:#15241d;border:1px solid #244a3a;color:#34d399;border-radius:5px;padding:2px 10px;font-size:12px;margin-left:8px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>浏览器 OCR 工具 <span class="pill">纯前端 · 文件不出本机</span><span class="pill">v1.2.20</span></h1>
+
+  <div class="row">
+    <button id="run" class="btn" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+      <span>识别</span>
+    </button>
+    <div class="lang-split" id="langSplit">
+      <button id="langBtn" class="btn ghost" aria-label="识别语言">
+        <span id="langLabel">中文+英文</span>
+        <svg class="caret-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="langMenu" class="fmt-menu">
+        <div class="fmt-item active" data-lang="chi_sim+eng">中文+英文</div>
+        <div class="fmt-item" data-lang="eng">英文</div>
+        <div class="fmt-item" data-lang="chi_sim">简体中文</div>
+        <div class="fmt-item" data-lang="jpn">日语</div>
+        <div class="fmt-item" data-lang="fra">法语</div>
+      </div>
+    </div>
+    <button id="copy" class="btn ghost" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span>复制</span>
+    </button>
+    <div class="dl-split" id="dlSplit">
+      <button id="dl" class="btn ghost" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span id="dlLabel">下载 .txt</span>
+      </button>
+      <button id="dlCaret" class="btn ghost caret" disabled aria-label="选择下载格式">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="fmtMenu" class="fmt-menu">
+        <div class="fmt-item" data-fmt="txt">TXT 文本</div>
+        <div class="fmt-item" data-fmt="markdown">Markdown</div>
+        <div class="fmt-item" data-fmt="xlsx">Excel（仅表格）</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status"><span id="stIcon"></span><span id="stText">首次使用会联网下载识别引擎与语言包。</span></div>
+
+  <div class="cols">
+    <div class="col">
+      <div id="stage" class="stage">
+        <div id="empty" class="empty">
+          <label class="filebtn" for="file" id="filebtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>选择文件</span>
+            <input type="file" id="file" accept="image/*,application/pdf" class="fileinput">
+          </label>
+          <div id="pholder" class="pholder"></div>
+        </div>
+        <div id="imgwrap" class="imgwrap">
+          <img id="preview" alt="预览">
+        </div>
+        <div id="zoombar" class="zoombar">
+          <button id="zin" class="zbtn" type="button" title="放大">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+          </button>
+          <button id="zout" class="zbtn" type="button" title="缩小">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+          </button>
+          <button id="zreset" class="zbtn" type="button" title="重置（1:1 居中）">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 9 8 9"/></svg>
+          </button>
+          <button id="replace" class="zbtn" type="button" title="重新上传">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </button>
+          <button id="del" class="zbtn" type="button" title="删除图片">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <textarea id="out" cols="100" wrap="virtual" style="width:100%" placeholder="识别结果将显示在这里…"></textarea>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const status = $('status'), out = $('out'), preview = $('preview'), pholder = $('pholder');
+const stText = $('stText'), stIcon = $('stIcon');
+
+// Tesseract 引擎资源地址。cdnjs 不提供 tesseract-core.wasm.js（404），
+// 会导致 createWorker 静默挂死、点击「识别」后无任何响应，因此统一改用 jsDelivr。
+// 注意：worker / core 由独立的 Worker 线程加载，路径必须写进 createWorker 的
+// options 才会传递给 Worker 线程；仅设置全局 Tesseract.workerPath/corePath 不够。
+const TESS_WORKER = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js';
+const TESS_CORE   = 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1/tesseract-core.wasm.js';
+const TESS_LANG   = 'https://tessdata.projectnaptha.com/4.0.0';
+if(window.Tesseract){ Tesseract.workerPath = TESS_WORKER; }
+
+// 默认就绪状态文案
+const READY_MSG = '首次使用会联网下载识别引擎与语言包。';
+// 预览区空状态：上传按钮下方的默认提示，写明支持的文件类型
+const HINT_MSG = '支持图片（PNG / JPG / WebP 等）与 PDF 文件';
+
+// ===== 预览图片 平移 / 缩放 =====
+const stage = $('stage'), zoombar = $('zoombar');
+let view = { s:1, tx:0, ty:0 };          // s=缩放比, tx/ty=位移(px)
+function applyView(){
+  preview.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`;
+}
+function setScaleAt(newS, cx, cy){        // 以 stage 内坐标(cx,cy)为锚点缩放
+  newS = Math.min(Math.max(newS, 0.2), 8);
+  const ix = (cx - view.tx) / view.s;     // 锚点对应的图片坐标
+  const iy = (cy - view.ty) / view.s;
+  view.tx = cx - ix * newS;
+  view.ty = cy - iy * newS;
+  view.s = newS;
+  applyView();
+}
+function zoomBy(f){                        // 以预览区中心为锚点缩放
+  const r = stage.getBoundingClientRect();
+  setScaleAt(view.s*f, r.width/2, r.height/2);
+}
+function resetView(){ view = {s:1, tx:0, ty:0}; applyView(); }
+
+// 滚轮：ctrl/cmd 键 => 缩放（触控板捏合发 ctrlKey，鼠标 cmd+滚轮发 metaKey）；否则平移（含双指滑动）
+stage.addEventListener('wheel', e=>{
+  if(preview.style.display!=='block') return;
+  e.preventDefault(); showZoombar();
+  if(e.ctrlKey || e.metaKey){
+    const r = stage.getBoundingClientRect();
+    setScaleAt(view.s * Math.exp(-e.deltaY*0.0015), e.clientX-r.left, e.clientY-r.top);
+  }else{
+    // 归一化：鼠标滚轮 deltaMode 常为"行"(1)，需换算成像素，否则平移幅度过小
+    const k = e.deltaMode===1 ? 16 : e.deltaMode===2 ? stage.clientHeight : 1;
+    view.tx -= e.deltaX*k; view.ty -= e.deltaY*k; applyView();
+  }
+}, {passive:false});
+
+// 鼠标长按拖动图片
+let pressTimer=null, dragging=false, psx=0, psy=0, ptx=0, pty=0;
+preview.addEventListener('mousedown', e=>{
+  if(e.button!==0 || preview.style.display!=='block') return;
+  e.preventDefault();
+  psx=e.clientX; psy=e.clientY; ptx=view.tx; pty=view.ty;
+  pressTimer=setTimeout(()=>{ dragging=true; preview.style.cursor='grabbing'; }, 350);
+});
+window.addEventListener('mousemove', e=>{
+  if(!dragging) return;
+  view.tx = ptx + (e.clientX-psx); view.ty = pty + (e.clientY-psy); applyView();
+});
+window.addEventListener('mouseup', ()=>{
+  if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; }
+  if(dragging){ dragging=false; preview.style.cursor='grab'; }
+});
+
+// 缩放 / 重置 按钮
+$('zin').onclick   = ()=>{ showZoombar(); zoomBy(1.2); };
+$('zout').onclick  = ()=>{ showZoombar(); zoomBy(1/1.2); };
+$('zreset').onclick= ()=>{ showZoombar(); resetView(); };
+// 重新上传：从工具条打开文件选择框，替换当前图片
+$('replace').onclick = ()=>{ showZoombar(); $('file').click(); };
+
+// 工具条：鼠标移动显示，无操作 3 秒后自动隐藏
+let hideTimer=null;
+function showZoombar(){
+  if(preview.style.display!=='block') return;
+  zoombar.classList.add('show');
+  if(hideTimer) clearTimeout(hideTimer);
+  hideTimer=setTimeout(()=>zoombar.classList.remove('show'), 3000);
+}
+stage.addEventListener('mousemove', showZoombar);
+// 在工具条上滚动时不平移图片
+zoombar.addEventListener('wheel', e=>e.stopPropagation(), {passive:true});
+
+// ===== 按钮可用状态（有文件才允许识别）=====
+let recognizing=false;
+function updateRunState(){ $('run').disabled = recognizing || !$('file').files[0]; }
+
+function setStatus(t){ stText.textContent = t; }
+// 识别进行中禁用「选择文件」按钮（PDF 预览区没有工具条，这是唯一的换文件入口）
+function setFileBtnDisabled(d){
+  $('file').disabled = d;                    // 禁用隐藏的 file input，阻断点击弹窗
+  $('filebtn').classList.toggle('disabled', d); // 灰显 + 屏蔽 label 点击
+}
+// 状态栏图标：'spin' 转圈（识别中）/ 'ok' 对钩（完成）/ 'err' 警告（出错）/ '' 无
+function setIcon(kind){
+  if(kind==='spin')      stIcon.innerHTML = '<span class="spin"></span>';
+  else if(kind==='ok')   stIcon.textContent = '✅';
+  else if(kind==='err')  stIcon.textContent = '⚠️';
+  else                   stIcon.textContent = '';
+}
+
+// 把 Tesseract 的英文进度状态映射成中文，覆盖「下载语言包 / 加载内核 / 初始化」
+// 等整个准备阶段，避免首次使用（需联网下载引擎与语言包）时页面长时间“假死”无反馈。
+function ocrStatusText(m){
+  const p = Math.round((m.progress||0)*100);
+  switch(m.status){
+    case 'loading tesseract core':       return '加载识别内核…';
+    case 'initializing tesseract':       return '初始化识别引擎…';
+    case 'loading language traineddata': return `下载语言包 ${p}%`;
+    case 'initializing api':             return '初始化接口…';
+    case 'recognizing text':             return `识别中… ${p}%`;
+    default:                            return m.status || '准备中…';
+  }
+}
+
+// 去掉 CJK / 数字 / 标点 之间的多余空格（保留英文词间、数字与数字间的正常空格）
+function isCJKorPunct(c){
+  const code = c.codePointAt(0);
+  return (code>=0x3400 && code<=0x9fff) ||
+         (code>=0x3000 && code<=0x303f) ||
+         (code>=0xff00 && code<=0xffef) ||
+         '.,;:!?\'"()[]{}<>/\\|@#$%^&*=+~-'.includes(c);
+}
+function cleanCJK(text){
+  const chars = [...text];
+  const out = [];
+  for(let i=0;i<chars.length;i++){
+    const c = chars[i];
+    if(c===' ' || c==='\t' || c.charCodeAt(0)===160){   // 仅处理空格/制表/不换行空格，保留换行
+      const prev = chars[i-1], next = chars[i+1];
+      if((prev && isCJKorPunct(prev)) || (next && isCJKorPunct(next))) continue;
+    }
+    out.push(c);
+  }
+  return out.join('');
+}
+
+// OCR 结果重排：把识别产生的“每视觉行一个换行”合并成连贯段落，
+// 让文字能真正撑满结果区的整行宽度（列表/编号与分页标记保留原样）。
+function reflowText(text){
+  const isMarker = l => /^———/.test(l);
+  const blocks = [];
+  let cur = null;
+  const close = () => { if(cur && cur.length){ blocks.push(cur); cur = null; } };
+  for(const raw of text.split('\n')){
+    const l = raw.trim();
+    if(!l){ close(); continue; }
+    if(isMarker(l)){ close(); blocks.push([l]); continue; }
+    if(!cur) cur = [];
+    cur.push(l);
+  }
+  close();
+  return blocks.map(b => {
+    if(b.length === 1) return b[0];
+    const listy = b.filter(l => /^\d+[.、．)]|^[-*•]|^\[[^\]]*\]/.test(l)).length;
+    if(listy >= Math.max(2, Math.ceil(b.length/2))) return b.join('\n');   // 列表保留换行
+    let s = b[0];
+    for(let i=1;i<b.length;i++){
+      const a = s[s.length-1], c = b[i][0];
+      const sp = /[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]/.test(c);          // 中英边界补空格
+      s += (sp ? ' ' : '') + b[i];
+    }
+    return s;
+  }).join('\n\n');
+}
+
+// 选中文件后立即在左侧预览：图片直接显示，PDF 显示提示
+const imgwrap = $('imgwrap'), del = $('del'), filebtn = $('filebtn'), empty = $('empty');
+
+function resetPreview(){
+  $('file').value = '';
+  preview.style.display='none';
+  imgwrap.style.display='none';
+  empty.style.display='flex';
+  pholder.style.display='block'; pholder.textContent=HINT_MSG;
+  zoombar.classList.remove('show');
+  resetView();
+  setIcon('');
+  setFileBtnDisabled(false);
+  updateRunState();
+  lastResult = null;                 // 清除上次识别结果，避免格式切换渲染旧内容
+  syncFmtOption();
+}
+
+$('file').addEventListener('change', () => {
+  lastResult = null;                 // 换文件后旧结果不再可用
+  syncFmtOption();
+  const f = $('file').files[0];
+  if(!f) return;   // 取消文件对话框：保持原预览，不清除
+  if(f.type === 'application/pdf'){
+    preview.style.display='none';
+    imgwrap.style.display='none';
+    empty.style.display='flex';
+    pholder.style.display='block';
+    pholder.textContent = '已选择 PDF：' + f.name + '\n（点击「开始识别」后，结果在右侧显示）';
+    zoombar.classList.remove('show');
+  } else {
+    preview.src = URL.createObjectURL(f);
+    preview.style.display='block';
+    imgwrap.style.display='inline-block';
+    empty.style.display='none';
+    pholder.style.display='none';
+    resetView();
+    showZoombar();
+  }
+  updateRunState();
+  setIcon('');
+});
+
+// 圆形删除按钮：移除已添加的图片，恢复默认状态
+del.onclick = () => {
+  resetPreview();
+  out.value=''; $('copy').disabled=$('dl').disabled=$('dlCaret').disabled=true;
+  setStatus(READY_MSG);
+};
+
+$('run').onclick = async () => {
+  const f = $('file').files[0];
+  if(!f){ setStatus('请先选择一个文件。'); return; }
+  const lang = curLang;
+  out.value = '';
+  recognizing = true; updateRunState();
+  setFileBtnDisabled(true);
+  setIcon('spin');
+  setStatus('正在准备识别引擎（首次使用需联网下载，请稍候）…');
+  $('copy').disabled = $('dl').disabled = $('dlCaret').disabled = true;
+  // 左侧预览保持：图片继续显示，PDF 显示识别中提示
+  if(f.type === 'application/pdf'){
+    preview.style.display='none';
+    pholder.style.display='block';
+    pholder.textContent = '正在识别 PDF：' + f.name;
+  } else {
+    preview.style.display='block';
+    pholder.style.display='none';
+  }
+  try{
+    if(f.type === 'application/pdf'){
+      const bytes = await f.arrayBuffer();
+      const parts = await pdfToText(bytes, lang);
+      if(!parts.length) throw new Error('未能提取到文本');
+      lastResult = { parts, tables: collectTables(parts) };
+    } else {
+      const worker = await Tesseract.createWorker(lang, 1, {workerPath:TESS_WORKER, corePath:TESS_CORE, langPath:TESS_LANG, logger:m=>{
+        setStatus(ocrStatusText(m));
+      }});
+      const { data } = await worker.recognize(f);
+      await worker.terminate();
+      const text = reflowText(cleanCJK(data.text));
+      lastResult = { parts: [{page:0, label:'', blocks:[{type:'text', text}]}], tables: [] };
+    }
+    // 结果就绪：按当前格式渲染 + 更新按钮文案
+    const prevFmt = fmtVal();
+    syncFmtOption();
+    renderOutByFmt();
+    const nT = currentTables().length;
+    let doneMsg;
+    if(!out.value.trim()) doneMsg = '未提取到文本（可能是图片型 PDF 且识别为空）。';
+    else if(prevFmt === 'xlsx' && nT === 0) doneMsg = '识别完成。未检测到表格，输出格式已切回 TXT。';
+    else if(nT > 0 && fmtVal() === 'markdown') doneMsg = '识别完成。已还原 ' + nT + ' 张表格为 Markdown。';
+    else if(nT > 0 && fmtVal() === 'xlsx') doneMsg = '识别完成。共 ' + nT + ' 张表格：点击「下载 .xlsx」可导出（每个表格一个 sheet，纯文本不含在内）。';
+    else if(nT > 0) doneMsg = '识别完成。检测到 ' + nT + ' 张表格（TXT 已展平，可切换 Markdown / Excel 查看）。';
+    else doneMsg = '识别完成。';
+    setStatus(doneMsg);
+    setIcon('ok');
+    $('copy').disabled = $('dl').disabled = $('dlCaret').disabled = false;
+  }catch(e){
+    setStatus('出错：'+e.message);
+    setIcon('err');
+    console.error(e);
+  }finally{
+    // PDF 结束后把预览区文案还原，避免停留在「正在识别 PDF：xxx」
+    if(f.type === 'application/pdf'){ pholder.textContent = '已选择 PDF：' + f.name; }
+    recognizing = false; updateRunState();
+    setFileBtnDisabled(false);
+  }
+};
+
+// ===== 表格提取 / 渲染核心纯函数（与 ocr-browser.html 集成版本保持一致） =====
+// 供 node 单测 + 复制进 HTML 使用，不含任何 DOM 依赖。
+
+// —— token 文本拼接：ASCII 词间补一个空格，其余直接拼接 ——
+function joinCellText(toks){
+  let s = '';
+  for(const t of toks){
+    if(s && /[A-Za-z0-9]$/.test(s[s.length-1]) && /^[A-Za-z0-9]/.test(t.str)) s += ' ';
+    s += t.str;
+  }
+  return s.trim();
+}
+
+// —— 单页文本层表格检测（启发式，近似结果） ——
+// items: pdf.js getTextContent().items 过滤后（有 str 的 TextItem）
+//   使用字段：str、transform[4]=x、transform[5]=y(页面坐标,向上为正)、width、height
+// 返回 { tables:[{header,rows,idxs}], used:Set<原始序号> }
+function detectTablesOnPage(items){
+  const tokens = [];
+  items.forEach((it, idx)=>{
+    const str = it.str;
+    if(!str || !str.trim()) return;
+    const x = it.transform[4], y = it.transform[5];
+    const h = (it.height||0) > 0 ? it.height : 10;
+    let w = (it.width||0) > 0 ? it.width : str.length * h * 0.7;
+    if(w <= 0) w = 1;
+    tokens.push({idx, str, x, y, w, h});
+  });
+  const used = new Set();
+  if(tokens.length < 4) return {tables: [], used};   // 至少 2 行×2 列（小表也要能检出）
+
+  // 1) 行聚类：y 接近的 token 归为同一视觉行（页面坐标 y 向上，大值在上）
+  tokens.sort((a,b)=> b.y - a.y);
+  const lines = [];
+  for(const t of tokens){
+    if(!lines.length){ lines.push({y0:t.y, y1:t.y, mh:t.h, toks:[t]}); continue; }
+    const L = lines[lines.length-1];
+    const mh = Math.max(L.mh, t.h);
+    if(Math.abs(t.y - (L.y0 + L.y1)/2) <= Math.max(mh*0.72, 2)){
+      L.y0 = Math.min(L.y0, t.y); L.y1 = Math.max(L.y1, t.y);
+      L.mh = mh; L.toks.push(t);
+    } else {
+      lines.push({y0:t.y, y1:t.y, mh:t.h, toks:[t]});
+    }
+  }
+  for(const L of lines) L.toks.sort((a,b)=> a.x - b.x);
+
+  // 2) 行内按大间隙切列
+  const sortedH = lines.map(l=>l.mh).sort((a,b)=>a-b);
+  const medH = sortedH[Math.floor(sortedH.length/2)] || 10;
+  const gapTh = Math.max(medH * 0.75, 4);       // 间隙超过此值视为列缝
+  const tol   = Math.max(medH * 0.5, 2);        // 同列边界的容差
+  for(const L of lines){
+    L.cells = [];
+    let cur = null;
+    for(const t of L.toks){
+      if(!cur){ cur = {x0:t.x, x1:t.x + t.w, toks:[t]}; L.cells.push(cur); continue; }
+      if(t.x - cur.x1 > gapTh){ cur = {x0:t.x, x1:t.x + t.w, toks:[t]}; L.cells.push(cur); }
+      else { cur.x1 = Math.max(cur.x1, t.x + t.w); cur.toks.push(t); }
+    }
+  }
+
+  // 3) 相邻候选行合并成表：列数相同 + 逐格边界(两端/中心其一)接近 + 垂直距离合理
+  function nearCells(a, b){
+    const d = Math.min(Math.abs(a.x0-b.x0), Math.abs(a.x1-b.x1),
+                       Math.abs((a.x0+a.x1)/2 - (b.x0+b.x1)/2));
+    return d <= tol;
+  }
+  function compatible(A, B){
+    // 允许相邻行列数相差 1（真实表格常有补充列），只比对较短一侧
+    if(Math.abs(A.cells.length - B.cells.length) > 1) return false;
+    const dy = Math.abs((A.y0+A.y1)/2 - (B.y0+B.y1)/2);
+    if(dy > Math.max(A.mh, B.mh) * 3.2) return false;   // 中间隔着太远的行，不强行并表
+    const n = Math.min(A.cells.length, B.cells.length);
+    if(n < 2) return false;
+    let ok = 0;
+    for(let i=0;i<n;i++) if(nearCells(A.cells[i], B.cells[i])) ok++;
+    return ok >= n - 1;
+  }
+  // 列表项（• / - / 数字. 开头）不当作表格行，避免误判为 2 列表
+  // 注意：数字. 的标点用「必选」而非「可选」，否则数字表格首列（如孤零零的“1”）会被误判为列表而丢表
+  function isBulletLine(L){
+    const f = (L.toks[0].str||'').trim();
+    return /^[•·\-*‣◦]$/.test(f) || /^(\d+)[.)、]$/.test(f) || /^[a-zA-Z][.)]$/.test(f);
+  }
+  const groups = [];
+  let g = null;
+  const LMAX = 40;                       // 单元格文本超过该长度视为排版正文而非表格（防误判）
+  for(const L of lines){
+    if(L.cells.length < 2) continue;
+    if(isBulletLine(L)) continue;        // 列表项（•/数字. 开头）不当作表格行
+    const longCell = L.cells.some(c=> c.toks.reduce((n,t)=> n + t.str.length, 0) > LMAX);
+    if(longCell) continue;               // 行被整段长文本占据（正文/两端对齐行）不当作表格行
+    if(!g){ g = [L]; continue; }
+    const prev = g[g.length-1];
+    if(compatible(prev, L)) g.push(L);
+    else { if(g.length >= 2) groups.push(g); g = [L]; }
+  }
+  if(g && g.length >= 2) groups.push(g);
+
+  // 4) 每组 → 一张表：首行作为表头（跨页重复表头后续在 collectTables 合并）
+  //    数据行列数若与表头不同：多出列合并进最后一列，缺少列补空，保证渲染整齐
+  const tables = [];
+  for(const grp of groups){
+    const cellText = c => joinCellText(c.toks);
+    const header = grp[0].cells.map(cellText);
+    const nCol = header.length;
+    const rows = grp.slice(1).map(L => {
+      let c = L.cells.map(cellText);
+      if(c.length > nCol){                       // 数据行多出列：把多余列合并进最后一列
+        const extra = c.slice(nCol).join(' ');
+        c = c.slice(0, nCol); c[nCol-1] = (c[nCol-1] ? c[nCol-1] + ' ' : '') + extra;
+      }
+      while(c.length < nCol) c.push('');
+      return c;
+    });
+    const idxs = [];
+    for(const L of grp) for(const c of L.cells) for(const t of c.toks) { idxs.push(t.idx); used.add(t.idx); }
+    tables.push({header, rows, idxs});
+  }
+  return {tables, used};
+}
+
+// —— 页面内容拆块：正文块(text) + 表格块(table) ——
+// items: 页全部 TextItem（含无 str 的也先 filter 在外层）；tables: detectTablesOnPage 的 tables
+function pageToBlocks(items, detect){
+  if(!detect.tables.length){
+    return [{type:'text', text: items.map(i=>i.str).join(' ').trim()}];   // 与旧版输出完全一致
+  }
+  const rest = items.filter((it, idx)=> !detect.used.has(idx));
+  const text = rest.map(i=>i.str).join(' ').trim();
+  const blocks = [];
+  if(text) blocks.push({type:'text', text});
+  for(const t of detect.tables) blocks.push({type:'table', header:t.header, rows:t.rows});
+  return blocks;
+}
+
+// —— 跨页同构表合并（Excel 导出 PDF 常见：每页重复表头，合并成一张表） ——
+// parts: [{page, tables:[{header,rows}]}]
+function collectTables(parts){
+  const out = [];
+  let last = null;                       // {header,rows,page,pageEnd,single}
+  for(const p of parts){
+    if(p.tables && p.tables.length){
+      for(const t of p.tables){
+        if(last && last.single && p.page === last.pageEnd + 1 && sameHeader(last.header, t.header)){
+          last.rows = last.rows.concat(t.rows);
+          last.pageEnd = p.page;
+          continue;                       // 本页仅此一表且同构，可继续链式合并
+        }
+        const rec = {header:t.header, rows:t.rows, page:p.page, pageEnd:p.page, single:(p.tables.length===1)};
+        out.push(rec); last = rec;
+      }
+    } else {
+      last = null;                        // 该页无表，打断跨页合并
+    }
+  }
+  return out.map(r=>({header:r.header, rows:r.rows,
+                      page:r.page===r.pageEnd ? r.page : r.page+'-'+r.pageEnd}));
+}
+function sameHeader(a, b){
+  if(!a || !b || a.length!==b.length) return false;
+  for(let i=0;i<a.length;i++) if(String(a[i]).trim() !== String(b[i]).trim()) return false;
+  return true;
+}
+
+// —— 渲染：TXT / Markdown / 表格 ——
+function flattenTable(t){
+  const rows = [t.header].concat(t.rows);
+  return rows.map(r=> r.map(c=>String(c==null?'':c)).join('  ')).join('\n');
+}
+function renderTxt(parts){
+  return parts.map(p=>{
+    const s = [];
+    if(p.label) s.push(p.label);
+    for(const b of p.blocks){
+      if(b.type==='text') s.push(b.text);
+      else s.push(flattenTable(b));
+    }
+    return s.join('\n');
+  }).join('\n');
+}
+
+function mdEscape(c){ return String(c==null?'':c).replace(/\|/g,'\\|').replace(/\r?\n/g,' ').trim(); }
+function mdTable(t){
+  const n = Math.max(1, t.header.length, ...t.rows.map(r=>r.length));
+  const mk = r => '| ' + Array.from({length:n}, (_,i)=> mdEscape(r[i])).join(' | ') + ' |';
+  const sep = '|' + Array(n).fill('---').join('|') + '|';
+  return [mk(t.header), sep].concat(t.rows.map(mk)).join('\n');
+}
+function renderMd(parts){
+  return parts.map(p=>{
+    const s = [];
+    for(const b of p.blocks){
+      if(b.type==='text'){ if(b.text && b.text.trim()) s.push(b.text.trim()); }
+      else s.push(mdTable(b));
+    }
+    const body = s.join('\n\n');
+    return p.label ? p.label + '\n\n' + body : body;
+  }).join('\n\n');
+}
+
+// Excel sheet 名约束：最长 31 字符、不能含 \ / : * ? [ ]
+function sanitizeSheetName(name){
+  name = String(name).replace(/[\\/:*?\[\]]/g, '').replace(/\s+/g,' ').trim();
+  if(!name) name = 'Sheet1';
+  if(name.length > 31) name = name.slice(0,31);
+  return name;
+}
+
+
+// —— 识别结果（含表格结构）与输出格式联动 ——
+let lastResult = null;                       // {parts:[{page,label,blocks,tables}], tables: 跨页合并后的表}
+function currentTables(){ return lastResult ? lastResult.tables : []; }
+let curFmt = 'txt';                              // 当前导出格式：txt / markdown / xlsx
+let curLang = 'chi_sim+eng';                     // 当前识别语言
+function fmtVal(){ return curFmt; }
+function setFmt(v){
+  curFmt = v;
+  updateDlLabel();
+  document.querySelectorAll('#fmtMenu .fmt-item').forEach(el=>{
+    el.classList.toggle('active', el.dataset.fmt === v);
+  });
+  if(lastResult) renderOutByFmt();
+}
+function updateDlLabel(){
+  $('dlLabel').textContent = '下载 .' + (fmtVal()==='markdown' ? 'md' : fmtVal()==='xlsx' ? 'xlsx' : 'txt');
+}
+// 识别结果就绪后调用：无表格时 Excel 不可用（禁用菜单项；若正选中则回退 TXT）
+function syncFmtOption(){
+  const has = currentTables().length > 0;
+  const x = document.querySelector('#fmtMenu [data-fmt="xlsx"]');
+  if(x) x.classList.toggle('disabled', !has);
+  if(!has && curFmt === 'xlsx'){ setFmt('txt'); }
+  else updateDlLabel();
+}
+// 按当前格式把识别结果渲染进结果区（切换格式时也会被调用）
+function renderOutByFmt(){
+  if(!lastResult) return;
+  const fmt = fmtVal();
+  if(fmt === 'xlsx'){
+    // Excel(仅表格)：结果区只显示表格，不含正文文字
+    out.value = lastResult.parts.map(p=>{
+      const tbls = p.blocks.filter(b=>b.type==='table').map(mdTable);
+      return tbls.join('\n\n');
+    }).filter(s=>s.trim()).join('\n\n').trim();
+  }else if(fmt === 'markdown'){
+    out.value = renderMd(lastResult.parts);
+  }else{
+    out.value = renderTxt(lastResult.parts);
+  }
+}
+function saveBlob(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+// 格式下拉：箭头展开菜单、菜单项切换格式、点外部收起
+const fmtMenu = $('fmtMenu');
+$('dlCaret').addEventListener('click', (e)=>{
+  if($('dlCaret').disabled) return;
+  e.stopPropagation();
+  const open = fmtMenu.classList.toggle('open');
+  $('dlCaret').classList.toggle('open', open);
+});
+fmtMenu.querySelectorAll('.fmt-item').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    if(el.classList.contains('disabled')) return;
+    setFmt(el.dataset.fmt);
+    fmtMenu.classList.remove('open');
+    $('dlCaret').classList.remove('open');
+  });
+});
+// 语言下拉：箭头展开菜单、菜单项切换语言
+function setLang(v){
+  curLang = v;
+  const el = document.querySelector('#langMenu [data-lang="'+v+'"]');
+  $('langLabel').textContent = el ? el.textContent : v;
+  document.querySelectorAll('#langMenu .fmt-item').forEach(x=> x.classList.toggle('active', x.dataset.lang === v));
+}
+const langMenu = $('langMenu');
+$('langBtn').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  const open = langMenu.classList.toggle('open');
+  $('langBtn').classList.toggle('open', open);
+});
+langMenu.querySelectorAll('.fmt-item').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    setLang(el.dataset.lang);
+    langMenu.classList.remove('open');
+    $('langBtn').classList.remove('open');
+  });
+});
+document.addEventListener('click', (e)=>{
+  if(!$('dlSplit').contains(e.target)){
+    fmtMenu.classList.remove('open');
+    $('dlCaret').classList.remove('open');
+  }
+  if(!$('langSplit').contains(e.target)){
+    langMenu.classList.remove('open');
+    $('langBtn').classList.remove('open');
+  }
+});
+
+async function pdfToText(bytes, lang){
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const pdf = await pdfjsLib.getDocument({data:bytes}).promise;
+  const parts = [];
+  for(let n=1;n<=pdf.numPages;n++){
+    setStatus(`处理第 ${n}/${pdf.numPages} 页…`);
+    const page = await pdf.getPage(n);
+    // 1) 先尝试原生文本层
+    const tc = await page.getTextContent();
+    const items = tc.items.filter(i=>i.str && i.str.trim());
+    const layer = items.map(i=>i.str).join(' ').trim();
+    // 文本层足够长、或虽短（如小表格）但能识别出表格结构 → 走文本层保留坐标。
+    // 只有当页面几乎没有任何文本时才回退 OCR（扫描/图片型页面）。
+    let det = null;
+    if(items.length) det = detectTablesOnPage(items);
+    if(det && (layer.length > 20 || det.tables.length > 0)){
+      // 文本层：页面内容拆成「正文 + 表格」块
+      parts.push({
+        page:n,
+        label:`——— 第 ${n} 页（文本层）———`,
+        blocks: pageToBlocks(items, det),
+        tables: det.tables.map(t=>({header:t.header, rows:t.rows}))
+      });
+      continue;
+    }
+    // 2) 回退到 OCR（扫描型页面：识别结果没有坐标信息，不做表格还原）
+    const vp = page.getViewport({scale:2.5});
+    const cv = document.createElement('canvas');
+    cv.width = vp.width; cv.height = vp.height;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+    await page.render({canvasContext:ctx, viewport:vp}).promise;
+    const worker = await Tesseract.createWorker(lang, 1, {workerPath:TESS_WORKER, corePath:TESS_CORE, langPath:TESS_LANG, logger:m=>{
+      setStatus('第 ' + n + ' 页 · ' + ocrStatusText(m));
+    }});
+    const { data:{ text } } = await worker.recognize(cv);
+    await worker.terminate();
+    parts.push({
+      page:n,
+      label:`——— 第 ${n} 页（OCR）———`,
+      blocks:[{type:'text', text: reflowText(cleanCJK(text))}],
+      tables:[]
+    });
+  }
+  return parts;
+}
+
+$('copy').onclick = () => { navigator.clipboard.writeText(out.value); setStatus('已复制到剪贴板。'); };
+
+$('dl').onclick = () => {
+  const fmt = fmtVal();
+  const _f = $('file').files[0];
+  const base = _f ? _f.name.replace(/\.[^.]+$/, '') : 'ocr_result';   // 用源文件名（去原后缀）作下载名前缀
+  if(fmt === 'xlsx'){
+    const tables = currentTables();
+    if(!tables.length){ setStatus('没有可导出的表格。'); return; }
+    if(typeof XLSX === 'undefined'){ setStatus('出错：Excel 组件加载失败，请检查网络后重试。'); return; }
+    const wb = XLSX.utils.book_new();
+    tables.forEach((t,i)=>{
+      const aoa = [t.header].concat(t.rows);
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName('表格' + (i+1) + (t.page ? '（第'+t.page+'页）' : '')));
+    });
+    const buf = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+    const fname = base + '.xlsx';
+    saveBlob(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), fname);
+    setStatus('已导出 ' + tables.length + ' 个表格到 ' + fname + '（每个表格一个 sheet，可直接用 Excel 打开）。');
+    return;
+  }
+  const ext = fmt === 'markdown' ? 'md' : 'txt';
+  saveBlob(new Blob([out.value], {type:'text/plain;charset=utf-8'}), base + '.' + ext);
+  setStatus('已下载 ' + base + '.' + ext + '。');
+};
+
+resetPreview();   // 初始：空状态显示"选择文件"按钮，「开始识别」禁用
+</script>
+</body>
+</html>
